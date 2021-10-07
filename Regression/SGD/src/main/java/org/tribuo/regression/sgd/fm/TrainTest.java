@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.tribuo.regression.sgd;
+package org.tribuo.regression.sgd.fm;
 
 import com.oracle.labs.mlrg.olcut.config.ConfigurationManager;
 import com.oracle.labs.mlrg.olcut.config.Option;
@@ -31,7 +31,7 @@ import org.tribuo.math.optimisers.GradientOptimiserOptions;
 import org.tribuo.regression.RegressionFactory;
 import org.tribuo.regression.Regressor;
 import org.tribuo.regression.evaluation.RegressionEvaluation;
-import org.tribuo.regression.sgd.linear.LinearSGDTrainer;
+import org.tribuo.regression.sgd.RegressionObjective;
 import org.tribuo.regression.sgd.objectives.AbsoluteLoss;
 import org.tribuo.regression.sgd.objectives.Huber;
 import org.tribuo.regression.sgd.objectives.SquaredLoss;
@@ -41,9 +41,9 @@ import java.io.IOException;
 import java.util.logging.Logger;
 
 /**
- * Build and run a linear regression for a standard dataset.
+ * Build and run a regression factorization machine for a standard dataset.
  */
-public class TrainTest {
+public final class TrainTest {
 
     private static final Logger logger = Logger.getLogger(TrainTest.class.getName());
 
@@ -68,12 +68,11 @@ public class TrainTest {
     /**
      * Command line options.
      */
-    public static class SGDOptions implements Options {
+    public static class FMRegressionOptions implements Options {
         @Override
         public String getOptionsDescription() {
             return "Trains and tests a linear SGD regression model on the specified datasets.";
         }
-
         /**
          * The dataset loading options.
          */
@@ -103,10 +102,24 @@ public class TrainTest {
          */
         @Option(charName = 'z', longName = "minibatch-size", usage = "Minibatch size.")
         public int minibatchSize = 1;
+        /**
+         * Factor size.
+         */
+        @Option(charName = 'd', longName = "factor-size", usage = "Factor size.")
+        public int factorSize = 6;
+        /**
+         * Variance of the initialization gaussian.
+         */
+        @Option(longName = "variance", usage = "Variance of the initialization gaussian.")
+        public double variance = 0.1;
+        /**
+         * Standardise the output regressors before model fitting.
+         */
+        @Option(longName = "standardise", usage = "Standardise the output regressors before model fitting.")
+        public boolean standardise = false;
     }
 
     /**
-     * Runs a TrainTest CLI.
      * @param args the command line arguments
      * @throws IOException if there is any error reading the examples.
      */
@@ -116,7 +129,7 @@ public class TrainTest {
         // Use the labs format logging.
         LabsLogFormatter.setAllLogFormatters();
 
-        SGDOptions o = new SGDOptions();
+        FMRegressionOptions o = new FMRegressionOptions();
         ConfigurationManager cm;
         try {
             cm = new ConfigurationManager(args,o);
@@ -156,7 +169,9 @@ public class TrainTest {
         Dataset<Regressor> train = data.getA();
         Dataset<Regressor> test = data.getB();
 
-        Trainer<Regressor> trainer = new LinearSGDTrainer(obj,grad,o.epochs,o.loggingInterval,o.minibatchSize,o.general.seed);
+        logger.info("Feature domain - " + train.getFeatureIDMap());
+
+        Trainer<Regressor> trainer = new FMRegressionTrainer(obj,grad,o.epochs,o.loggingInterval,o.minibatchSize,o.general.seed,o.factorSize,o.variance,o.standardise);
         logger.info("Training using " + trainer.toString());
         final long trainStart = System.currentTimeMillis();
         Model<Regressor> model = trainer.train(train);
@@ -169,8 +184,6 @@ public class TrainTest {
         final long testStop = System.currentTimeMillis();
         logger.info("Finished evaluating model " + Util.formatDuration(testStart,testStop));
         System.out.println(evaluation.toString());
-
-        //System.out.println("Features - " + model.getTopFeatures(model.getFeatureIDMap().size()+1));
 
         if (o.general.outputPath != null) {
             o.general.saveModel(model);

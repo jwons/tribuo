@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.tribuo.multilabel.sgd.linear;
+package org.tribuo.multilabel.sgd.fm;
 
 import ai.onnx.proto.OnnxMl;
 import org.tribuo.Example;
@@ -22,19 +22,17 @@ import org.tribuo.ImmutableFeatureMap;
 import org.tribuo.ImmutableOutputInfo;
 import org.tribuo.Prediction;
 import org.tribuo.classification.Label;
-import org.tribuo.common.sgd.AbstractLinearSGDModel;
-import org.tribuo.math.LinearParameters;
+import org.tribuo.common.sgd.AbstractFMModel;
+import org.tribuo.common.sgd.FMParameters;
 import org.tribuo.math.la.DenseVector;
 import org.tribuo.math.util.VectorNormalizer;
 import org.tribuo.multilabel.MultiLabel;
 import org.tribuo.onnx.ONNXContext;
 import org.tribuo.onnx.ONNXExportable;
-import org.tribuo.onnx.ONNXOperators;
 import org.tribuo.onnx.ONNXShape;
 import org.tribuo.onnx.ONNXUtils;
 import org.tribuo.provenance.ModelProvenance;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -42,16 +40,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The inference time version of a multi-label linear model trained using SGD.
+ * The inference time version of a multi-label factorization machine trained using SGD.
  * <p>
  * See:
  * <pre>
- * Bottou L.
- * "Large-Scale Machine Learning with Stochastic Gradient Descent"
- * Proceedings of COMPSTAT, 2010.
+ * Rendle, S.
+ * Factorization machines.
+ * 2010 IEEE International Conference on Data Mining
  * </pre>
  */
-public class LinearSGDModel extends AbstractLinearSGDModel<MultiLabel> implements ONNXExportable {
+public class FMMultiLabelModel extends AbstractFMModel<MultiLabel> implements ONNXExportable {
     private static final long serialVersionUID = 2L;
 
     private final VectorNormalizer normalizer;
@@ -68,9 +66,9 @@ public class LinearSGDModel extends AbstractLinearSGDModel<MultiLabel> implement
      * @param generatesProbabilities Does this model produce probabilistic outputs.
      * @param threshold The threshold for emitting a label.
      */
-    LinearSGDModel(String name, ModelProvenance provenance,
-                   ImmutableFeatureMap featureIDMap, ImmutableOutputInfo<MultiLabel> outputIDInfo,
-                   LinearParameters parameters, VectorNormalizer normalizer, boolean generatesProbabilities, double threshold) {
+    FMMultiLabelModel(String name, ModelProvenance provenance,
+                      ImmutableFeatureMap featureIDMap, ImmutableOutputInfo<MultiLabel> outputIDInfo,
+                      FMParameters parameters, VectorNormalizer normalizer, boolean generatesProbabilities, double threshold) {
         super(name, provenance, featureIDMap, outputIDInfo, parameters, generatesProbabilities);
         this.normalizer = normalizer;
         this.threshold = threshold;
@@ -101,8 +99,8 @@ public class LinearSGDModel extends AbstractLinearSGDModel<MultiLabel> implement
     }
 
     @Override
-    protected LinearSGDModel copy(String newName, ModelProvenance newProvenance) {
-        return new LinearSGDModel(newName,newProvenance,featureIDMap,outputIDInfo,(LinearParameters)modelParameters.copy(),normalizer,generatesProbabilities,threshold);
+    protected FMMultiLabelModel copy(String newName, ModelProvenance newProvenance) {
+        return new FMMultiLabelModel(newName,newProvenance,featureIDMap,outputIDInfo,(FMParameters)modelParameters.copy(),normalizer,generatesProbabilities,threshold);
     }
 
     @Override
@@ -118,7 +116,7 @@ public class LinearSGDModel extends AbstractLinearSGDModel<MultiLabel> implement
     @Override
     public OnnxMl.GraphProto exportONNXGraph(ONNXContext context) {
         OnnxMl.GraphProto.Builder graphBuilder = OnnxMl.GraphProto.newBuilder();
-        graphBuilder.setName("MultiLabel-LinearSGDModel");
+        graphBuilder.setName("FMMultiLabelModel");
 
         // Make inputs and outputs
         OnnxMl.TypeProto inputType = ONNXUtils.buildTensorTypeNode(new ONNXShape(new long[]{-1,featureIDMap.size()}, new String[]{"batch",null}), OnnxMl.TensorProto.DataType.FLOAT);
@@ -128,21 +126,11 @@ public class LinearSGDModel extends AbstractLinearSGDModel<MultiLabel> implement
         OnnxMl.ValueInfoProto outputValueProto = OnnxMl.ValueInfoProto.newBuilder().setType(outputType).setName("output").build();
         graphBuilder.addOutput(outputValueProto);
 
-        // Add weights
-        OnnxMl.TensorProto weightInitializerProto = weightBuilder(context);
-        graphBuilder.addInitializer(weightInitializerProto);
-
-        // Add biases
-        OnnxMl.TensorProto biasInitializerProto = biasBuilder(context);
-        graphBuilder.addInitializer(biasInitializerProto);
-
-        // Make gemm
-        String[] gemmInputs = new String[]{inputValueProto.getName(),weightInitializerProto.getName(),biasInitializerProto.getName()};
-        OnnxMl.NodeProto gemm = ONNXOperators.GEMM.build(context,gemmInputs,context.generateUniqueName("gemm_output"));
-        graphBuilder.addNode(gemm);
+        // Build the output neutral bits of the onnx graph
+        String outputName = generateONNXGraph(context, graphBuilder, inputValueProto.getName());
 
         // Make output normalizer
-        List<OnnxMl.NodeProto> normalizerProtos = normalizer.exportNormalizer(context,gemm.getOutput(0),"output");
+        List<OnnxMl.NodeProto> normalizerProtos = normalizer.exportNormalizer(context,outputName,"output");
         if (normalizerProtos.isEmpty()) {
             throw new IllegalArgumentException("Normalizer " + normalizer.getClass() + " cannot be exported in ONNX models.");
         } else {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.tribuo.multilabel.sgd.linear;
+package org.tribuo.multilabel.sgd.fm;
 
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
@@ -24,12 +24,12 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.tribuo.Dataset;
+import org.tribuo.Model;
 import org.tribuo.Prediction;
 import org.tribuo.Trainer;
 import org.tribuo.VariableIDInfo;
 import org.tribuo.VariableInfo;
-import org.tribuo.common.sgd.AbstractLinearSGDModel;
-import org.tribuo.common.sgd.AbstractLinearSGDTrainer;
+import org.tribuo.common.sgd.AbstractFMTrainer;
 import org.tribuo.common.sgd.AbstractSGDTrainer;
 import org.tribuo.interop.onnx.DenseTransformer;
 import org.tribuo.interop.onnx.MultiLabelTransformer;
@@ -39,8 +39,8 @@ import org.tribuo.multilabel.MultiLabel;
 import org.tribuo.multilabel.MultiLabelFactory;
 import org.tribuo.multilabel.evaluation.MultiLabelEvaluation;
 import org.tribuo.multilabel.example.MultiLabelDataGenerator;
-import org.tribuo.multilabel.sgd.objectives.Hinge;
 import org.tribuo.multilabel.sgd.objectives.BinaryCrossEntropy;
+import org.tribuo.multilabel.sgd.objectives.Hinge;
 import org.tribuo.test.Helpers;
 
 import java.io.IOException;
@@ -55,15 +55,15 @@ import java.util.logging.Logger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
-public class TestSGDLinear {
-    private static final Logger logger = Logger.getLogger(TestSGDLinear.class.getName());
+public class TestFMMultiLabel {
+    private static final Logger logger = Logger.getLogger(TestFMMultiLabel.class.getName());
 
-    private static final LinearSGDTrainer hinge = new LinearSGDTrainer(new Hinge(),new AdaGrad(0.1,0.1),5,1000, Trainer.DEFAULT_SEED);
-    private static final LinearSGDTrainer sigmoid = new LinearSGDTrainer(new BinaryCrossEntropy(),new AdaGrad(0.1,0.1),5,1000, Trainer.DEFAULT_SEED);
+    private static final FMMultiLabelTrainer hinge = new FMMultiLabelTrainer(new Hinge(),new AdaGrad(0.1,0.1),5,1000, Trainer.DEFAULT_SEED, 5,0.1);
+    private static final FMMultiLabelTrainer sigmoid = new FMMultiLabelTrainer(new BinaryCrossEntropy(),new AdaGrad(0.1,0.1),5,1000, Trainer.DEFAULT_SEED,5,0.1);
 
     @BeforeAll
     public static void setup() {
-        Class<?>[] classes = new Class<?>[]{AbstractSGDTrainer.class, AbstractLinearSGDTrainer.class,LinearSGDTrainer.class};
+        Class<?>[] classes = new Class<?>[]{AbstractSGDTrainer.class, AbstractFMTrainer.class,FMMultiLabelTrainer.class};
         for (Class<?> c : classes) {
             Logger logger = Logger.getLogger(c.getName());
             logger.setLevel(Level.WARNING);
@@ -79,8 +79,8 @@ public class TestSGDLinear {
         testTrainer(train,test,sigmoid);
     }
 
-    private static void testTrainer(Dataset<MultiLabel> train, Dataset<MultiLabel> test, LinearSGDTrainer trainer) {
-        AbstractLinearSGDModel<MultiLabel> model = trainer.train(train);
+    private static void testTrainer(Dataset<MultiLabel> train, Dataset<MultiLabel> test, Trainer<MultiLabel> trainer) {
+        Model<MultiLabel> model = trainer.train(train);
 
         List<Prediction<MultiLabel>> predictions = model.predict(test);
         Prediction<MultiLabel> first = predictions.get(0);
@@ -101,11 +101,11 @@ public class TestSGDLinear {
     public void testOnnxSerialization() throws IOException, OrtException {
         Dataset<MultiLabel> train = MultiLabelDataGenerator.generateTrainData();
         Dataset<MultiLabel> test = MultiLabelDataGenerator.generateTestData();
-        LinearSGDModel model = (LinearSGDModel) sigmoid.train(train);
+        FMMultiLabelModel model = (FMMultiLabelModel) sigmoid.train(train);
 
         // Write out model
-        Path onnxFile = Files.createTempFile("tribuo-sgd-test",".onnx");
-        model.saveONNXModel("org.tribuo.multilabel.sgd.linear.test",1,onnxFile);
+        Path onnxFile = Files.createTempFile("tribuo-fm-test",".onnx");
+        model.saveONNXModel("org.tribuo.multilabel.sgd.fm.test",1,onnxFile);
 
         // Prep mappings
         Map<String, Integer> featureMapping = new HashMap<>();
@@ -141,7 +141,7 @@ public class TestSGDLinear {
                     if (other == null) {
                         fail("Failed to find label " + l.getKey() + " in ORT prediction.");
                     } else {
-                        assertEquals(l.getValue().getScore(),other.getScore(),1e-6);
+                        assertEquals(l.getValue().getScore(),other.getScore(),1e-5);
                     }
                 }
             }
